@@ -43,6 +43,10 @@
 
 #include "eggshell.h"
 
+#ifdef WITH_PCRE2
+#include "terminal-pcre2.h"
+#endif
+
 #define URL_MATCH_CURSOR  (GDK_HAND2)
 #define SKEY_MATCH_CURSOR (GDK_HAND2)
 
@@ -154,19 +158,23 @@ typedef struct
 {
 	const char *pattern;
 	TerminalURLFlavour flavor;
-	GRegexCompileFlags flags;
+	gboolean caseless;
 } TerminalRegexPattern;
 
 static const TerminalRegexPattern url_regex_patterns[] =
 {
-	{ SCHEME "//(?:" USERPASS "\\@)?" HOST PORT URLPATH, FLAVOR_AS_IS, G_REGEX_CASELESS },
-	{ "(?:www|ftp)" HOSTCHARS_CLASS "*\\." HOST PORT URLPATH , FLAVOR_DEFAULT_TO_HTTP, G_REGEX_CASELESS  },
-	{ "(?:callto:|h323:|sip:)" USERCHARS_CLASS "[" USERCHARS ".]*(?:" PORT "/[a-z0-9]+)?\\@" HOST, FLAVOR_VOIP_CALL, G_REGEX_CASELESS  },
-	{ "(?:mailto:)?" USERCHARS_CLASS "[" USERCHARS ".]*\\@" HOSTCHARS_CLASS "+\\." HOST, FLAVOR_EMAIL, G_REGEX_CASELESS  },
-	{ "news:[[:alnum:]\\Q^_{|}~!\"#$%&'()*+,./;:=?`\\E]+", FLAVOR_AS_IS, G_REGEX_CASELESS  },
+	{ SCHEME "//(?:" USERPASS "\\@)?" HOST PORT URLPATH, FLAVOR_AS_IS, TRUE },
+	{ "(?:www|ftp)" HOSTCHARS_CLASS "*\\." HOST PORT URLPATH , FLAVOR_DEFAULT_TO_HTTP, TRUE  },
+	{ "(?:callto:|h323:|sip:)" USERCHARS_CLASS "[" USERCHARS ".]*(?:" PORT "/[a-z0-9]+)?\\@" HOST, FLAVOR_VOIP_CALL, TRUE  },
+	{ "(?:mailto:)?" USERCHARS_CLASS "[" USERCHARS ".]*\\@" HOSTCHARS_CLASS "+\\." HOST, FLAVOR_EMAIL, TRUE  },
+	{ "news:[[:alnum:]\\Q^_{|}~!\"#$%&'()*+,./;:=?`\\E]+", FLAVOR_AS_IS, TRUE  },
 };
 
+#ifdef WITH_PCRE2
+static VteRegex **url_regexes;
+#else
 static GRegex **url_regexes;
+#endif
 static TerminalURLFlavour *url_regex_flavors;
 static guint n_url_regexes;
 
@@ -349,7 +357,11 @@ terminal_screen_init (TerminalScreen *screen)
 
 		tag_data = g_slice_new (TagData);
 		tag_data->flavor = url_regex_flavors[i];
+#ifdef WITH_PCRE2
+		tag_data->tag = vte_terminal_match_add_regex (terminal, url_regexes[i], 0);
+#else
 		tag_data->tag = vte_terminal_match_add_gregex (terminal, url_regexes[i], 0);
+#endif
 		vte_terminal_match_set_cursor_type (terminal, tag_data->tag, URL_MATCH_CURSOR);
 
 		priv->match_tags = g_slist_prepend (priv->match_tags, tag_data);
@@ -572,21 +584,45 @@ terminal_screen_class_init (TerminalScreenClass *klass)
 
 	/* Precompile the regexes */
 	n_url_regexes = G_N_ELEMENTS (url_regex_patterns);
+#ifdef WITH_PCRE2
+	url_regexes = g_new0 (VteRegex*, n_url_regexes);
+#else
 	url_regexes = g_new0 (GRegex*, n_url_regexes);
+#endif
 	url_regex_flavors = g_new0 (TerminalURLFlavour, n_url_regexes);
 
 	for (i = 0; i < n_url_regexes; ++i)
 	{
 		GError *error = NULL;
 
+#ifdef WITH_PCRE2
+	url_regexes[i] = vte_regex_new (url_regex_patterns[i].pattern, -1,
+					PCRE2_UTF | PCRE2_NO_UTF_CHECK |
+					(url_regex_patterns[i].caseless ? PCRE2_CASELESS : 0),
+					&error);
+	if (error)
+	{
+		g_message ("%s", error->message);
+		g_error_free (error);
+	}
+
+	if (!vte_regex_jit (url_regexes[i], PCRE2_JIT_COMPLETE, &error) ||
+	    !vte_regex_jit (url_regexes[i], PCRE2_JIT_PARTIAL_SOFT, &error)) {
+		g_printerr ("Failed to JIT regex '%s': %s\n", url_regex_patterns[i].pattern, error->message);
+		g_clear_error (&error);
+	}
+#else
 		url_regexes[i] = g_regex_new (url_regex_patterns[i].pattern,
-		                              url_regex_patterns[i].flags | G_REGEX_OPTIMIZE | G_REGEX_MULTILINE,
+					      G_REGEX_OPTIMIZE | G_REGEX_MULTILINE |
+					      (url_regex_patterns[i].caseless ? G_REGEX_CASELESS : 0),
 		                              0, &error);
+
 		if (error)
 		{
 			g_message ("%s", error->message);
 			g_error_free (error);
 		}
+#endif
 
 		url_regex_flavors[i] = url_regex_patterns[i].flavor;
 	}
