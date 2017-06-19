@@ -49,6 +49,30 @@ GIO_REQUIRED=2.25.12
 GTK_REQUIRED=3.14.0
 VTE_REQUIRED=0.38
 DCONF_REQUIRED=0.13.4
+PCRE2_REQUIRED=10.00
+
+# PCRE2
+
+AC_MSG_CHECKING([whether PCRE2 support is requested])
+AC_ARG_WITH([pcre2],
+  [AS_HELP_STRING([--without-pcre2],[Disable pcre2 support])],
+  [],[with_pcre2=yes])
+AC_MSG_RESULT([$with_pcre2])
+
+PCRE2_PKGS=
+if test "$with_pcre2" = "yes"; then
+  PCRE2_PKGS="libpcre2-8 >= $PCRE2_REQUIRED"
+
+  PKG_CHECK_MODULES([PCRE2],[$PCRE2_PKGS],,
+    [AC_MSG_ERROR([PCRE2 requested but libpcre2-8 not found. Use --without-pcre2 to disable PCRE2])])
+
+  AC_DEFINE([WITH_PCRE2],[1],[Define to 1 to enable pcre2 support])
+  EXTRA_DEPS="$EXTRA_DEPS $PCRE2_PKGS"
+fi
+
+AM_CONDITIONAL([WITH_PCRE2],[test "$with_pcre2" = "yes"])
+
+# pkg-config checks
 
 PKG_CHECK_MODULES([TERM],
   [vte-2.91 >= $VTE_REQUIRED
@@ -57,6 +81,7 @@ PKG_CHECK_MODULES([TERM],
    gio-2.0 >= $GIO_REQUIRED
    gtk+-3.0 >= $GTK_REQUIRED
    dconf >= $DCONF_REQUIRED
+   $PCRE2_PKGS
    x11])
 
 # ********
@@ -129,6 +154,7 @@ echo "
 	prefix:                 ${prefix}
 	source code location:   ${srcdir}
 	compiler:               ${CC}
+	PCRE2:                  ${with_pcre2}
 
 	s/key support:          ${enable_skey}
 "
