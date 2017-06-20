@@ -22,6 +22,10 @@
 
 #include <string.h>
 
+#ifdef WITH_PCRE2
+#include "terminal-pcre2.h"
+#endif
+
 #include "terminal-search-dialog.h"
 #include "terminal-util.h"
 
@@ -60,8 +64,14 @@ typedef struct _TerminalSearchDialogPrivate
 	GtkEntryCompletion *completion;
 
 	/* Cached regex */
+	gboolean regex_caseless;
+	gboolean regex_multiline;
+	char *regex_pattern;
+#ifdef WITH_PCRE2
+	VteRegex *regex;
+#else
 	GRegex *regex;
-	GRegexCompileFlags regex_compile_flags;
+#endif
 } TerminalSearchDialogPrivate;
 
 
@@ -340,8 +350,9 @@ GRegex *
 terminal_search_dialog_get_regex (GtkWidget *dialog)
 {
 	TerminalSearchDialogPrivate *priv;
-	GRegexCompileFlags compile_flags;
 	const char *text, *pattern;
+	gboolean caseless, multiline = FALSE;
+	gs_free_error GError *error = NULL;
 
 	g_return_val_if_fail (GTK_IS_DIALOG (dialog), NULL);
 
@@ -350,13 +361,10 @@ terminal_search_dialog_get_regex (GtkWidget *dialog)
 
 	pattern = text = terminal_search_dialog_get_search_text (dialog);
 
-	compile_flags = G_REGEX_OPTIMIZE;
-
-	if (!GET_FLAG (match_case_checkbutton))
-		compile_flags |= G_REGEX_CASELESS;
+	caseless = !GET_FLAG (match_case_checkbutton)
 
 	if (GET_FLAG (regex_checkbutton))
-		compile_flags |= G_REGEX_MULTILINE;
+		multiline = TRUE;
 	else
 		pattern = g_regex_escape_string (text, -1);
 
@@ -368,14 +376,46 @@ terminal_search_dialog_get_regex (GtkWidget *dialog)
 			g_free ((char *) old_pattern);
 	}
 
-	if (!priv->regex || priv->regex_compile_flags != compile_flags)
+	if (!priv->regex || (priv->regex_caseless != caseless && priv->regex_multiline != multiline))
 	{
-		priv->regex_compile_flags = compile_flags;
-		if (priv->regex)
+		if (priv->regex) {
+#ifdef WITH_PCRE2
+			vte_regex_unref (priv->regex);
+#else
 			g_regex_unref (priv->regex);
+#endif
+		}
+
+		g_clear_pointer (&priv->regex_pattern, g_free);
 
 		/* TODO Error handling */
-		priv->regex = g_regex_new (pattern, compile_flags, 0, NULL);
+#ifdef WITH_PCRE2
+		guint32 compile_flags;
+
+		compile_flags = PCRE2_UTF | PCRE2_NO_UTF_CHECK;
+		if (caseless)
+			compile_flags |= PCRE2_CASELESS;
+		if (multiline)
+			compile_flags |= PCRE2_MULTILINE;
+
+		priv->regex = vte_regex_new (pattern, -1, compile_flags, &error);
+		if (priv->regex != NULL &&
+		(!vte_regex_jit (priv->regex, PCRE2_JIT_COMPLETE, NULL) ||
+		!vte_regex_jit (priv->regex, PCRE2_JIT_PARTIAL_SOFT, NULL))) {
+		}
+#else
+		GRegexCompileFlags compile_flags;
+
+		compile_flags = G_REGEX_OPTIMIZE;
+		if (caseless)
+			compile_flags |= G_REGEX_CASELESS;
+		if (multiline)
+			compile_flags |= G_REGEX_MULTILINE;
+
+		priv->regex = g_regex_new (pattern, compile_flags, 0, &error);
+#endif
+		if (priv->regex != NULL)
+			gs_transfer_out_value (&priv->regex_pattern, &pattern);
 	}
 
 	if (pattern != text)

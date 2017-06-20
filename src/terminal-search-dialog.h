@@ -43,7 +43,13 @@ const gchar 	*terminal_search_dialog_get_search_text	(GtkWidget   *dialog);
 
 TerminalSearchFlags
 terminal_search_dialog_get_search_flags(GtkWidget   *dialog);
-GRegex		*terminal_search_dialog_get_regex	(GtkWidget   *dialog);
+
+#ifdef WITH_PCRE2
+VteRegex *
+#else
+GRegex *
+#endif
+		terminal_search_dialog_get_regex	(GtkWidget   *dialog);
 
 G_END_DECLS
 
