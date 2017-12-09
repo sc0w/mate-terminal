@@ -2875,11 +2875,11 @@ terminal_window_update_size_set_geometry (TerminalWindow *window,
 
     if (pos_gravity == GDK_GRAVITY_SOUTH_EAST ||
         pos_gravity == GDK_GRAVITY_NORTH_EAST)
-        force_pos_x = gdk_screen_get_width (gtk_widget_get_screen (app)) -
+        force_pos_x = WidthOfScreen (gdk_x11_screen_get_xscreen (gtk_widget_get_screen (app))) -
                       pixel_width + force_pos_x;
     if (pos_gravity == GDK_GRAVITY_SOUTH_WEST ||
         pos_gravity == GDK_GRAVITY_SOUTH_EAST)
-        force_pos_y = gdk_screen_get_height (gtk_widget_get_screen (app)) -
+        force_pos_y = HeightOfScreen (gdk_x11_screen_get_xscreen (gtk_widget_get_screen (app))) -
                       pixel_height + force_pos_y;
 
     /* we don't let you put a window offscreen; maybe some people would
